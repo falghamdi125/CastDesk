@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>producer</title></head>
+<body>
+<script>
+const { ipcRenderer } = require('electron');
+let cap = {};
+const MIMES = [
+  'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2',
+  'video/mp4;codecs=avc1,opus', 'video/mp4;codecs=avc1', 'video/mp4',
+  'video/webm;codecs=h264,opus', 'video/webm;codecs=h264', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=av1,opus', 'video/webm',
+];
+window.mimeSupport = () => Object.fromEntries(MIMES.map((m) => [m, MediaRecorder.isTypeSupported(m)]));
+
+async function getStream(sourceId, audio, fps) {
+  try {
+    const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: fps, max: fps } }, audio });
+    s.__via = 'getDisplayMedia';
+    return s;
+  } catch (err) {
+    console.warn('getDisplayMedia failed: ' + err.message);
+    const s = await navigator.mediaDevices.getUserMedia({
+      audio: audio ? { mandatory: { chromeMediaSource: 'desktop' } } : false,
+      video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sourceId, maxFrameRate: fps } },
+    });
+    s.__via = 'getUserMedia(legacy) after: ' + err.message;
+    return s;
+  }
+}
+
+window.startCapture = async ({ mime, fps, maxHeight, audio, sourceId }) => {
+  const stream = await getStream(sourceId, audio, fps);
+  const video = document.createElement('video');
+  video.muted = true; video.srcObject = stream; await video.play();
+  await new Promise((r) => { if (video.videoWidth) r(); else video.onloadedmetadata = () => r(); });
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const scale = maxHeight ? Math.min(1, maxHeight / vh) : 1;
+  const cw = Math.round((vw * scale) / 2) * 2, ch = Math.round((vh * scale) / 2) * 2;
+  const canvas = document.createElement('canvas'); canvas.width = cw; canvas.height = ch;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const cs = canvas.captureStream(0);
+  const ct = cs.getVideoTracks()[0];
+  const at = stream.getAudioTracks()[0];
+  if (at) cs.addTrack(at);
+  let frames = 0;
+  const timer = setInterval(() => { ctx.drawImage(video, 0, 0, cw, ch); ct.requestFrame(); frames++; }, 1000 / fps);
+  const rec = new MediaRecorder(cs, { mimeType: mime, videoBitsPerSecond: 4e6, audioBitsPerSecond: 128000, videoKeyFrameIntervalDuration: 1000 });
+  let chunks = 0, bytes = 0;
+  rec.ondataavailable = async (e) => { if (e.data.size) { chunks++; bytes += e.data.size; ipcRenderer.send('chunk', new Uint8Array(await e.data.arrayBuffer())); } };
+  rec.onerror = (e) => console.error('recorder error', e);
+  rec.start(100);
+  cap = { stream, cs, rec, timer, video, stats: () => ({ chunks, bytes, frames, vw, vh, cw, ch, hasAudio: !!at, recMime: rec.mimeType, state: rec.state }) };
+  return { via: stream.__via, vw, vh, cw, ch, hasAudio: !!at, recMime: rec.mimeType };
+};
+window.captureStats = () => (cap.stats ? cap.stats() : null);
+
+const AUDIO_MIMES = ['audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+window.audioMimeSupport = () => Object.fromEntries(AUDIO_MIMES.map((m) => [m, MediaRecorder.isTypeSupported(m)]));
+
+// System-audio-only capture (loopback) → MediaRecorder audio chunks
+window.startAudioCapture = async ({ mime, sourceId }) => {
+  const stream = await getStream(sourceId, true, 1);
+  const at = stream.getAudioTracks()[0];
+  if (!at) throw new Error('no loopback audio track');
+  const cs = new MediaStream([at]);
+  const rec = new MediaRecorder(cs, { mimeType: mime, audioBitsPerSecond: 192000 });
+  let chunks = 0, bytes = 0;
+  rec.ondataavailable = async (e) => { if (e.data.size) { chunks++; bytes += e.data.size; ipcRenderer.send('chunk', new Uint8Array(await e.data.arrayBuffer())); } };
+  rec.start(250);
+  cap = { stream, cs, rec, timer: null, stats: () => ({ chunks, bytes, recMime: rec.mimeType, state: rec.state }) };
+  return { via: stream.__via, recMime: rec.mimeType };
+};
+window.stopCapture = () => {
+  if (!cap.rec) return false;
+  clearInterval(cap.timer);
+  try { cap.rec.stop(); } catch (e) {}
+  cap.stream.getTracks().forEach((t) => t.stop());
+  cap.cs.getTracks().forEach((t) => t.stop());
+  cap = {};
+  return true;
+};
+</script>
+</body></html>

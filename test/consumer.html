@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>consumer</title>
+<style>body{margin:0;background:#000}video{width:100vw;height:100vh}</style></head>
+<body>
+<video id="v" autoplay muted playsinline></video>
+<script>
+const { ipcRenderer } = require('electron');
+const q = new URLSearchParams(location.search);
+const src = q.get('src');
+const secs = Number(q.get('secs') || 8);
+const seekTo = (() => { const m = /seek=(\d+)/.exec(location.hash) || /seek=(\d+)/.exec(src || ''); return m ? Number(m[1]) : null; })();
+const v = document.getElementById('v');
+const events = [];
+const t0 = performance.now();
+let maxCurrentTime = 0, error = null, seeked = false, firstFrameMs = null;
+for (const ev of ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting', 'stalled', 'pause', 'ended', 'seeking', 'seeked']) {
+  v.addEventListener(ev, () => { events.push(ev); });
+}
+v.addEventListener('playing', () => { if (firstFrameMs == null) firstFrameMs = Math.round(performance.now() - t0); });
+v.addEventListener('error', () => { error = v.error ? `${v.error.code}:${v.error.message}` : 'unknown'; });
+v.addEventListener('timeupdate', () => {
+  maxCurrentTime = Math.max(maxCurrentTime, v.currentTime);
+  if (seekTo != null && !seeked && v.currentTime > 1) { seeked = true; v.currentTime = seekTo; }
+});
+v.src = src;
+v.play().catch((e) => { events.push('play-rejected:' + e.message); });
+setTimeout(() => {
+  ipcRenderer.send('consumer:done', {
+    maxCurrentTime, currentTime: v.currentTime, readyState: v.readyState, networkState: v.networkState,
+    videoWidth: v.videoWidth, videoHeight: v.videoHeight, duration: v.duration, error, firstFrameMs,
+    events: [...new Set(events)].join(','),
+  });
+}, secs * 1000);
+</script>
+</body></html>

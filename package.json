@@ -1,0 +1,72 @@
+{
+  "name": "castdesk",
+  "productName": "CastDesk",
+  "version": "1.1.0",
+  "description": "Cast images, videos, your screen or a single window to Chromecast / Google TV devices from Windows",
+  "main": "src/main/main.js",
+  "author": "fisal",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win",
+    "test": "electron test/e2e.js",
+    "icon": "node scripts/make-icon.js"
+  },
+  "build": {
+    "appId": "dev.fisal.castdesk",
+    "productName": "CastDesk",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!test/**",
+      "!scripts/**",
+      "!node_modules/ffprobe-static/bin/darwin/**",
+      "!node_modules/ffprobe-static/bin/linux/**",
+      "!node_modules/ffprobe-static/bin/win32/ia32/**"
+    ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**",
+      "node_modules/ffprobe-static/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "icon": "assets/icon.png"
+  },
+  "dependencies": {
+    "castv2-client": "^1.2.0",
+    "ffmpeg-static": "^5.3.0",
+    "ffprobe-static": "^3.1.0",
+    "mime-types": "^3.0.2",
+    "multicast-dns": "^7.2.5"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.15.3",
+    "electron": "^44.0.0"
+  }
+}
